@@ -132,7 +132,6 @@
             update(ref(db, `gamestate/teams/${team}`), teamData);
         };
 
-        // เริ่มเกมใหม่ทันที (ข้ามหน้าแรก)
         window.startGame = function() {
             set(gameRef, {
                 gameState: 'playing',
@@ -146,7 +145,6 @@
             localState.activeTab = 'dashboard';
         };
 
-        // กลับไปหน้าแรก (Start Screen)
         window.backToHome = function() {
             set(gameRef, {
                 gameState: 'start',
@@ -464,14 +462,14 @@
         function render() {
             if (!globalState) return;
 
-            // จำตำแหน่ง Scroll ก่อนวาดหน้าจอใหม่
+            // 1. จำตำแหน่ง Scroll ก่อนวาดหน้าจอใหม่
             let scrollPos = 0;
             const scrollContainer = document.getElementById('scroll-container');
             if (scrollContainer) {
                 scrollPos = scrollContainer.scrollTop;
             }
             
-            // วาดหน้าจอตามสถานะเกม
+            // 2. วาดหน้าจอตามสถานะเกม
             if (globalState.gameState === 'start') {
                 appContainer.innerHTML = renderStartScreen();
             } else if (globalState.gameState === 'playing') {
@@ -480,13 +478,11 @@
                 appContainer.innerHTML = renderReflectionScreen();
             }
 
-            // คืนค่าตำแหน่ง Scroll เดิมกลับไป
-            setTimeout(() => {
-                const newScrollContainer = document.getElementById('scroll-container');
-                if (newScrollContainer) {
-                    newScrollContainer.scrollTop = scrollPos;
-                }
-            }, 0);
+            // 3. คืนค่าตำแหน่ง Scroll เดิมกลับไป ทันที (ไม่มี setTimeout)
+            const newScrollContainer = document.getElementById('scroll-container');
+            if (newScrollContainer) {
+                newScrollContainer.scrollTop = scrollPos;
+            }
         }
 
     </script>
