@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GM Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom styles for elements that might be tricky with just Tailwind utilities */
+        .text-shadow-glow-red {
+            text-shadow: 0 0 8px rgba(244,63,94,0.6);
+        }
+        .text-shadow-glow-orange {
+            text-shadow: 0 0 8px rgba(249,115,22,0.6);
+        }
+        /* Custom scrollbar for webkit to match the dark theme */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a; /* slate-950 */
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155; /* slate-700 */
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569; /* slate-600 */
+        }
+    </style>
+</head>
+<body class="bg-slate-950 font-sans text-slate-100 overflow-hidden">
+
+    <!-- Main Container -->
+    <div id="app-container" class="h-screen w-full flex flex-col">
+        <!-- Dynamic content will be injected here -->
+        <div class="flex items-center justify-center h-full">
+            <div class="animate-pulse text-indigo-400 font-bold">Connecting to Game Server...</div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getDatabase, ref, onValue, set, update } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyCgYmmqadX5SgfP_RO-HK7_GJ_zHyUrbV8",
+            authDomain: "support-me-dashboard.firebaseapp.com",
+            databaseURL: "https://support-me-dashboard-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "support-me-dashboard",
+            storageBucket: "support-me-dashboard.firebasestorage.app",
+            messagingSenderId: "129580614138",
+            appId: "1:129580614138:web:15388f705b0d2523656443",
+            measurementId: "G-XV3ZDN37Z1"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getDatabase(app);
+        const gameRef = ref(db, 'gamestate');
+
+        // Configuration
+        const ROUNDS = [
+            { id: 1, title: 'NORMAL WORK' },
+            { id: 2, title: 'WORKLOAD INCREASE' },
+            { id: 3, title: 'PRESSURE' }
+        ];
+
+        const initialTeamState = {
+            wellbeing: 3,
+            stress: 0,
+            taskCompleted: 0,
+            support: 0
+        };
+
+        // Local State
+        let localState = {
+            selectedTeam: 'A',
+            activeTab: 'dashboard'
+        };
+
+        // Global State 
+        let globalState = null;
+
+        const appContainer = document.getElementById('app-container');
+
+        onValue(gameRef, (snapshot) => {
+            const data = snapshot.val();
+            if (!data) {
+                set(gameRef, {
+                    gameState: 'start',
+                    currentRound: 1,
+                    teams: {
+                        A: { ...initialTeamState },
+                        B: { ...initialTeamState },
+                        C: { ...initialTeamState }
+                    }
+                });
+            } else {
+                globalState = data;
+                render();
+            }
+        });
+
+        window.updateStat = function(team, stat, delta) {
+            if (!globalState || globalState.gameState !== 'playing') return;
+
+            let teamData = { ...globalState.teams[team] };
+            let newWellbeing = teamData.wellbeing;
+            let newStress = teamData.stress;
+            let newStatValue = teamData[stat] + delta;
+
+            if (stat === 'taskCompleted' || stat === 'support') {
+                if (newStatValue < 0) return;
+                teamData[stat] = newStatValue;
+            } else if (stat === 'wellbeing') {
+                teamData.wellbeing = Math.max(0, Math.min(3, newWellbeing + delta));
+            } else if (stat === 'stress') {
+                newStress = newStress + delta;
+                if (newStress < 0) {
+                    newStress = 0;
+                }
+                if (newStress >= 3) {
+                    teamData.wellbeing = Math.max(0, newWellbeing - 1);
+                    newStress = 0;
+                } else {
+                    teamData.wellbeing = newWellbeing;
+                }
+                teamData.stress = newStress;
+            }
+
+            update(ref(db, `gamestate/teams/${team}`), teamData);
+        };
+
+        // เริ่มเกมใหม่ทันที (ข้ามหน้าแรก)
+        window.startGame = function() {
+            set(gameRef, {
+                gameState: 'playing',
+                currentRound: 1,
+                teams: {
+                    A: { ...initialTeamState },
+                    B: { ...initialTeamState },
+                    C: { ...initialTeamState }
+                }
+            });
+            localState.activeTab = 'dashboard';
+        };
+
+        // กลับไปหน้าแรก (Start Screen)
+        window.backToHome = function() {
+            set(gameRef, {
+                gameState: 'start',
+                currentRound: 1,
+                teams: {
+                    A: { ...initialTeamState },
+                    B: { ...initialTeamState },
+                    C: { ...initialTeamState }
+                }
+            });
+            localState.activeTab = 'dashboard';
+        };
+
+        window.nextRound = function() {
+            if (globalState.currentRound < 3) {
+                update(gameRef, { currentRound: globalState.currentRound + 1 });
+            } else {
+                update(gameRef, { gameState: 'reflection' });
+            }
+        };
+
+        window.selectTeam = function(teamId) {
+            localState.selectedTeam = teamId;
+            render();
+        };
+
+        window.setActiveTab = function(tab) {
+            localState.activeTab = tab;
+            render();
+        };
+
+        function generateIconsHtml(type, value, max = 3, iconSizeClass = 'text-2xl') {
+            let iconsHtml = '<div class="flex space-x-1.5">';
+            for (let i = 0; i < max; i++) {
+                if (type === 'wellbeing') {
+                    const isFilled = i < value;
+                    const classes = isFilled ? 'text-rose-500 text-shadow-glow-red' : 'text-slate-700';
+                    const icon = isFilled ? '❤️' : '🖤';
+                    iconsHtml += `<span class="${iconSizeClass} transition-all duration-300 ${classes}">${icon}</span>`;
+                } else if (type === 'stress') {
+                    const isFilled = i < value;
+                    const classes = isFilled ? 'text-orange-500 text-shadow-glow-orange' : 'text-slate-700 opacity-50';
+                    const icon = isFilled ? '😣' : '😐';
+                    iconsHtml += `<span class="${iconSizeClass} transition-all duration-300 ${classes}">${icon}</span>`;
+                }
+            }
+            iconsHtml += '</div>';
+            return iconsHtml;
+        }
+
+        function renderScoreDisplay(icon, label, value, colorText, type) {
+            let valueHtml = '';
+            if (type === 'wellbeing' || type === 'stress') {
+                valueHtml = generateIconsHtml(type, value);
+            } else {
+                valueHtml = `<span class="text-2xl font-black ${colorText}">${value}</span>`;
+            }
+
+            return `
+                <div class="flex justify-between items-center py-2.5 border-b border-slate-800/50 last:border-0 h-14">
+                    <div class="flex items-center text-slate-400">
+                        <span class="mr-3 text-xl">${icon}</span>
+                        <span class="text-sm font-bold uppercase tracking-wider">${label}</span>
+                    </div>
+                    ${valueHtml}
+                </div>
+            `;
+        }
+
+        function renderStartScreen() {
+            return `
+                <div class="min-h-screen flex flex-col items-center justify-center p-6">
+                    <div class="max-w-md w-full bg-slate-900 rounded-3xl shadow-2xl p-8 text-center border border-slate-800">
+                        <h1 class="text-4xl font-black text-white mb-2 tracking-tight">SUPPORT ME</h1>
+                        <p class="text-slate-400 mb-8 font-medium">Dashboard สำหรับ GM</p>
+                        
+                        <div class="bg-slate-800 rounded-2xl p-6 mb-8 text-left">
+                            <h2 class="text-white font-bold mb-4 flex items-center"><span class="mr-2">🎮</span> การตั้งค่าเริ่มต้น</h2>
+                            <ul class="text-slate-300 space-y-2 text-sm">
+                                <li>• มีทั้งหมด 3 ทีม (A, B, C)</li>
+                                <li>• พลังใจเริ่มต้น (Well-being) = 3</li>
+                                <li>• ความเครียดเริ่มต้น (Stress) = 0</li>
+                                <li>• งานเริ่มต้น (Tasks) = 0</li>
+                            </ul>
+                        </div>
+
+                        <button onclick="startGame()" class="w-full py-4 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-lg shadow-lg shadow-indigo-900/50 transition-all active:scale-95">
+                            START GAME
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderPlayingScreen() {
+            const currentRoundInfo = ROUNDS.find(r => r.id === globalState.currentRound);
+            
+            let teamsHtml = '';
+            for (const [teamId, data] of Object.entries(globalState.teams)) {
+                teamsHtml += `
+                    <div class="bg-slate-900 border-2 border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
+                        <div class="text-center mb-5 pb-4 border-b border-slate-800/80">
+                            <h2 class="text-3xl font-black text-slate-100">TEAM ${teamId}</h2>
+                        </div>
+                        <div class="space-y-1">
+                            ${renderScoreDisplay('❤️', 'Well-being', data.wellbeing, '', 'wellbeing')}
+                            ${renderScoreDisplay('😣', 'Stress', data.stress, '', 'stress')}
+                            ${renderScoreDisplay('✅', 'งานสำเร็จ', data.taskCompleted, 'text-emerald-400', '')}
+                            ${renderScoreDisplay('🤝', 'Support', data.support, 'text-blue-400', '')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            let teamSelectorsHtml = '';
+            ['A', 'B', 'C'].map(team => {
+                const isSelected = localState.selectedTeam === team;
+                const btnClass = isSelected ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-800/50';
+                teamSelectorsHtml += `<button onclick="selectTeam('${team}')" class="flex-1 py-3 rounded-lg font-bold text-sm transition-all duration-200 ${btnClass}">TEAM ${team}</button>`;
+            });
+
+            const controlsData = [
+                { stat: 'wellbeing', icon: '❤️', label: 'Well-being' },
+                { stat: 'stress', icon: '😣', label: 'Stress' },
+                { stat: 'taskCompleted', icon: '✅', label: 'งานสำเร็จ' },
+                { stat: 'support', icon: '🤝', label: 'Support' }
+            ];
+
+            let controlsHtml = '';
+            controlsData.forEach(c => {
+                controlsHtml += `
+                    <div class="bg-slate-800/80 rounded-xl p-3 flex flex-col items-center justify-center border border-slate-700/50 shadow-inner">
+                        <span class="text-[10px] text-slate-300 mb-3 flex items-center font-bold tracking-wide whitespace-nowrap">
+                            <span class="mr-1 text-[10px]">${c.icon}</span>${c.label}
+                        </span>
+                        <div class="flex items-center space-x-2 w-full justify-center">
+                            <button onclick="updateStat('${localState.selectedTeam}', '${c.stat}', -1)" class="w-8 h-8 rounded-full bg-slate-700 hover:bg-slate-600 text-slate-300 font-black text-sm flex items-center justify-center transition-all active:scale-90 shadow-sm">−</button>
+                            <button onclick="updateStat('${localState.selectedTeam}', '${c.stat}', 1)" class="w-8 h-8 rounded-full bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm flex items-center justify-center transition-all active:scale-90 shadow-sm shadow-indigo-900/30">+</button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            const activeTeamData = globalState.teams[localState.selectedTeam];
+
+            let contentHtml = '';
+            
+            if (localState.activeTab === 'dashboard') {
+                contentHtml = `
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-6 max-w-6xl mx-auto pb-8">
+                        ${teamsHtml}
+                    </div>
+                `;
+            } else {
+                contentHtml = `
+                    <div class="max-w-2xl mx-auto pb-8">
+                        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+                            <div class="absolute top-0 left-0 w-full h-1 bg-indigo-500"></div>
+                            
+                            <h2 class="text-xl font-bold text-white mb-6 flex items-center justify-center">
+                                <span class="text-indigo-400 mr-2">🎛️</span> แผงควบคุมหลัก
+                            </h2>
+
+                            <!-- Team Selector -->
+                            <div class="flex bg-slate-950 p-1 rounded-xl border border-slate-800 mb-8">
+                                ${teamSelectorsHtml}
+                            </div>
+
+                            <!-- Live Preview for Selected Team -->
+                            <div class="bg-slate-800/50 rounded-2xl p-5 mb-8 border border-slate-700/50">
+                                <div class="text-center text-slate-400 text-xs font-bold uppercase tracking-wider mb-4">
+                                    สถานะปัจจุบันของทีม ${localState.selectedTeam}
+                                </div>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                    <div class="flex flex-col items-center">
+                                        <span class="text-sm text-slate-300 mb-1">❤️ Well-being</span>
+                                        ${generateIconsHtml('wellbeing', activeTeamData.wellbeing)}
+                                    </div>
+                                    <div class="flex flex-col items-center">
+                                        <span class="text-sm text-slate-300 mb-1">😣 Stress</span>
+                                        ${generateIconsHtml('stress', activeTeamData.stress)}
+                                    </div>
+                                    <div class="flex flex-col items-center">
+                                        <span class="text-sm text-slate-300 mb-1">✅ งานสำเร็จ</span>
+                                        <span class="text-xl font-black text-emerald-400">${activeTeamData.taskCompleted}</span>
+                                    </div>
+                                    <div class="flex flex-col items-center">
+                                        <span class="text-sm text-slate-300 mb-1">🤝 Support</span>
+                                        <span class="text-xl font-black text-blue-400">${activeTeamData.support}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+                                ${controlsHtml}
+                            </div>
+
+                            <!-- Next Round Button -->
+                            <div class="flex justify-center border-t border-slate-800 pt-6 mt-4">
+                                <button onclick="nextRound()" class="w-full py-4 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-black text-lg shadow-lg shadow-indigo-900/40 transition-all active:scale-95 flex items-center justify-center space-x-2">
+                                    <span>${globalState.currentRound < 3 ? 'NEXT ROUND ➔' : 'END GAME 🏁'}</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <!-- Navigation Tabs for GM -->
+                <div class="flex-shrink-0 bg-slate-900 border-b border-slate-800 p-3 flex justify-center space-x-3 shadow-md z-20 relative">
+                    <button onclick="setActiveTab('dashboard')" class="px-6 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center shadow-sm ${localState.activeTab === 'dashboard' ? 'bg-indigo-600 text-white shadow-indigo-900/40' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}">
+                        <span class="mr-2">📊</span> SCOREBOARD
+                    </button>
+                    <button onclick="setActiveTab('control')" class="px-6 py-2.5 rounded-xl font-bold text-sm transition-all flex items-center shadow-sm ${localState.activeTab === 'control' ? 'bg-indigo-600 text-white shadow-indigo-900/40' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-white'}">
+                        <span class="mr-2">🎛️</span> CONTROLS
+                    </button>
+                </div>
+
+                <!-- Main Content Area -->
+                <div class="flex-1 overflow-y-auto p-4 md:p-6">
+                    <header class="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-5 mb-6 text-center shadow-lg relative overflow-hidden max-w-6xl mx-auto">
+                        <div class="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+                        <h1 class="text-2xl sm:text-3xl font-black text-white tracking-widest mb-1">SUPPORT ME</h1>
+                        <div class="inline-flex items-center justify-center px-5 py-2 rounded-full bg-slate-800 border border-slate-700 mt-2">
+                            <span class="text-indigo-400 font-black mr-2">ROUND ${globalState.currentRound} / 3</span>
+                            <span class="text-slate-300 text-sm font-bold">— ${currentRoundInfo.title}</span>
+                        </div>
+                    </header>
+
+                    ${contentHtml}
+                </div>
+            `;
+        }
+
+        function renderReflectionScreen() {
+            function getTrendHtml(val, initial, statType) {
+                if (val > initial) {
+                    const color = statType === 'wellbeing' ? 'text-emerald-400' : 'text-rose-400';
+                    return `<span class="${color} font-bold">↑ เพิ่มขึ้น</span>`;
+                }
+                if (val < initial) {
+                    const color = statType === 'wellbeing' ? 'text-rose-400' : 'text-emerald-400';
+                    return `<span class="${color} font-bold">↓ ลดลง</span>`;
+                }
+                return '<span class="text-slate-400 font-bold">— ค่าเริ่มต้น</span>';
+            }
+
+            let teamsReflectionHtml = '';
+            for (const [teamId, data] of Object.entries(globalState.teams)) {
+                teamsReflectionHtml += `
+                    <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 text-center shadow-xl relative overflow-hidden">
+                        <div class="absolute top-0 left-0 w-full h-1 bg-slate-700"></div>
+                        <h2 class="text-2xl font-black text-white mb-6">TEAM ${teamId}</h2>
+                        
+                        <div class="space-y-4">
+                            <div class="bg-slate-800/50 rounded-xl p-4 flex justify-between items-center border border-slate-700/50">
+                                <span class="text-slate-300">❤️ Well-being</span>
+                                ${getTrendHtml(data.wellbeing, initialTeamState.wellbeing, 'wellbeing')}
+                            </div>
+                            
+                            <div class="bg-slate-800/50 rounded-xl p-4 flex justify-between items-center border border-slate-700/50">
+                                <span class="text-slate-300">😣 Stress</span>
+                                ${getTrendHtml(data.stress, initialTeamState.stress, 'stress')}
+                            </div>
+                            
+                            <div class="bg-slate-800/50 rounded-xl p-4 flex justify-between items-center border border-slate-700/50">
+                                <span class="text-slate-300">🤝 Support Use</span>
+                                ${getTrendHtml(data.support, initialTeamState.support, 'support')}
+                            </div>
+                            
+                            <div class="pt-4 border-t border-slate-800 text-left">
+                                <div class="text-sm text-slate-500 mb-2">สรุปงานทั้งหมด</div>
+                                <div class="flex justify-between text-sm">
+                                    <span class="text-emerald-400">✅ สำเร็จ: ${data.taskCompleted}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="min-h-screen overflow-y-auto p-4 md:p-8 flex flex-col items-center justify-between">
+                    <div class="max-w-4xl w-full">
+                        <div class="text-center mb-10">
+                            <h1 class="text-3xl md:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-indigo-400 to-cyan-400 mb-2">
+                                GAME REFLECTION
+                            </h1>
+                            <p class="text-slate-400">บทสรุปและช่วงเวลาทบทวนการทำงานร่วมกัน</p>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-10">
+                            ${teamsReflectionHtml}
+                        </div>
+                    </div>
+                    
+                    <!-- ส่วนปุ่มควบคุมด้านล่าง -->
+                    <div class="mt-8 flex flex-col sm:flex-row justify-center items-center gap-4 pb-8 w-full">
+                        <button onclick="startGame()" class="px-8 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold shadow-lg shadow-indigo-900/40 transition-all active:scale-95 flex items-center justify-center w-full sm:w-auto">
+                            <span class="mr-2 text-xl">🔄</span> เริ่มเกมใหม่
+                        </button>
+                        <button onclick="backToHome()" class="px-8 py-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-bold shadow-lg border border-slate-700 transition-all active:scale-95 flex items-center justify-center w-full sm:w-auto">
+                            <span class="mr-2 text-xl">🏠</span> กลับไปหน้าแรก
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function render() {
+            if (!globalState) return;
+            
+            if (globalState.gameState === 'start') {
+                appContainer.innerHTML = renderStartScreen();
+            } else if (globalState.gameState === 'playing') {
+                appContainer.innerHTML = renderPlayingScreen();
+            } else if (globalState.gameState === 'reflection') {
+                appContainer.innerHTML = renderReflectionScreen();
+            }
+        }
+
+    </script>
+</body>
+</html>
